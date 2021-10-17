@@ -1,0 +1,25 @@
+\usepackage[code=Code39,X=0.5truemm,ratio=2.25,H=0.5truecm]{makebarcode}
+\usepackage{qrcode}
+\usepackage{graphicx}
+
+\setlength\normallineskiplimit{0pt}
+
+\newcommand{\positionmarkerV}[1]{\rotatebox{90}{\barcode{#1}}}
+\newcommand{\positionmarkerH}[1]{\raisebox{1ex}{\raisebox{-0.3truecm}{\barcode{#1}}}}
+\newcommand{\positionmarkerC}[1]{\raisebox{0.75truecm}{\qrcode[height=1.5truecm]{marker:#1}}}
+\newcommand{\positionmarkerNW}[1]{\positionmarkerC{NW:#1}}
+\newcommand{\positionmarkerNE}[1]{\positionmarkerC{NE:#1}}
+\newcommand{\positionmarkerSW}[1]{\positionmarkerC{SW:#1}}
+\newcommand{\positionmarkerSE}[1]{\positionmarkerC{SE:#1}}
+
+
+\newcommand{\Brankmark}[1]{\begin{picture}(10,14)
+    \thicklines
+\qbezier[5](5,0)(0,0)(0,7)
+\qbezier[5](5,14)(0,14)(0,7)
+\qbezier[5](5,14)(10,14)(10,7)
+\qbezier[5](5,0)(10,0)(10,7)
+\put(5,7){\makebox(0,0){#1}}
+\end{picture}}
+\newcommand{\brankmark}[1]{\raisebox{1ex}{\raisebox{-0.3truecm}{\Brankmark{}}}}
+
