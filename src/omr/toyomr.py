@@ -93,7 +93,24 @@ def detect_marker_box(frame,targetkeys=None):
         ans[(k1,k2)] = ((data[k1][0],data[k2][1]),(data[k1][0]+data[k1][2],data[k2][1]+data[k2][3]))  
     return ans
 
-    
+def detect_postion_markers(frame):
+    """
+    returns pair of dict D and list L, D[k1][k2] is rect of qrcode for problem k1 at k2, L is list of strings for all qrcodes. 
+    """
+    value = decode(frame, symbols=[ZBarSymbol.QRCODE])
+    all_strings = []
+    position_markers = {}
+    if value:
+        for qrcode in value:
+            key = qrcode.data.decode('utf-8')
+            all_strings.append(key)
+            if key.startswith("marker:"):
+                k=key[9:]
+                if k not in position_markers:
+                    position_markers[k]={}
+                position_markers[k][7:9]=qrcode.rect
+    return (position_markers,all_strings)
+
 def detect_angle(frame):
     """
     returns degrees of angle of image if position marker is detected; otherwise None.  the range of degree is depend on the range of output of math.atan2.
@@ -177,8 +194,8 @@ def read_from_camera(videodevicenum):
             frame=cv2.warpAffine(frame,rotation_mat,(w,h))
             img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            
-            
+            (position_markers,strings)=detect_postion_markers(img_gray)
+            print(position_markers,strings)
             cv2.imshow('toyomr scan image', frame)            
             # quit
             keyinput=cv2.waitKey(1)
