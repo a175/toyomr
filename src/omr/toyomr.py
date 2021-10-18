@@ -93,9 +93,10 @@ def detect_marker_box(frame,targetkeys=None):
         ans[(k1,k2)] = ((data[k1][0],data[k2][1]),(data[k1][0]+data[k1][2],data[k2][1]+data[k2][3]))  
     return ans
 
-def detect_position_marker(frame):
+    
+def detect_angle(frame):
     """
-    returns degrees of angle of image if position marker is detected; otherwise None.
+    returns degrees of angle of image if position marker is detected; otherwise None.  the range of degree is depend on the range of output of math.atan2.
     INPUT:
     frame - image
     """
@@ -135,7 +136,7 @@ def detect_position_marker(frame):
                     vlinekeys.append(("marker:NW"+post,"marker:SW"+post))
                 if "marker:NE"+post in keys:
                     hlinekeys.append(("marker:NW"+post,"marker:NE"+post))
-        lines=[(norm(data[k1][0],data[k2][0]),data[k1][0],data[k2][0],"h") for (k1,k2) in hlinekeys] + [(norm(data[k1][0],data[k2][0]),data[k1][0],data[k2][0],"v") for (k1,k2) in vlinekeys]
+        lines=[(norm_squared(data[k1][0],data[k2][0]),data[k1][0],data[k2][0],"h") for (k1,k2) in hlinekeys] + [(norm_squared(data[k1][0],data[k2][0]),data[k1][0],data[k2][0],"v") for (k1,k2) in vlinekeys]
         if lines != []:
             lines.sort()
             c=lines[-1]
@@ -152,14 +153,43 @@ def detect_position_marker(frame):
 def read_from_camera(videodevicenum):
     font = cv2.FONT_HERSHEY_SIMPLEX
     cap = cv2.VideoCapture(videodevicenum)
+
+    rotation_mat = cv2.getRotationMatrix2D((0,0),0, 1)
+    needs_rotate_90 = False
     while cap.isOpened():
         ret, frame = cap.read()
         if ret:
             img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            degrees=detect_position_marker(img_gray)
+            degrees=detect_angle(img_gray)
+            if degrees != None:
+                if (45 < degrees and degrees < 135) or (-135 < degrees and degrees < -45):
+                    needs_rotate_90=True
+                    degrees=degrees+90
+                    (w,h)=img_gray.shape
+                else:
+                    needs_rotate_90=False
+                    (h,w)=img_gray.shape
+                rotation_mat = cv2.getRotationMatrix2D((w/2,h/2), degrees, 1)
+
+            if needs_rotate_90:                
+                frame=cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            (h,w,c)=frame.shape
+            frame=cv2.warpAffine(frame,rotation_mat,(w,h))
+            img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            
+            
             cv2.imshow('toyomr scan image', frame)            
             # quit
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            keyinput=cv2.waitKey(1)
+            if keyinput & 0xFF == ord('q'):
+                break
+            elif keyinput & 0xFF == ord('a'):
+                break
+            elif keyinput & 0xFF == ord(' '):
+                break
+            elif keyinput & 0xFF == 27:
+                #ESC
                 break
 
     cap.release()
