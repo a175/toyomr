@@ -93,6 +93,31 @@ def detect_marker_box(frame,targetkeys=None):
         ans[(k1,k2)] = ((data[k1][0],data[k2][1]),(data[k1][0]+data[k1][2],data[k2][1]+data[k2][3]))  
     return ans
 
+
+def get_hmarker_area(position_markers):
+    ans =[]
+    keys = [ k for k in position_markers.keys() if "E" in k ]
+    if keys != []:
+        e = min(position_markers[k].left for k in keys )
+        ans.append(((e,-1),(0,-1)))
+    keys = [ k for k in position_markers.keys() if "W" in k ]
+    if keys != []:
+        w = max( position_markers[k].left+position_markers[k].width for k in keys)
+        ans.append(((0,w+1),(0,-1)))
+    return ans
+
+def get_vmarker_area(position_markers):
+    ans =[]
+    keys = [ k for k in position_markers.keys() if "S" in k ]
+    if keys != []:
+        s = min(position_markers[k].top for k in keys )
+        ans.append(((0,-1),(s,-1)))
+    keys = [ k for k in position_markers.keys() if "N" in k ]
+    if keys != []:
+        n = max( position_markers[k].top+position_markers[k].height for k in keys)
+        ans.append(((0,-1),(0,n)))
+    return ans
+
 def detect_postion_markers(frame):
     """
     returns pair of dict D and list L, D[k1][k2] is rect of qrcode for problem k1 at k2, L is list of strings for all qrcodes. 
@@ -106,9 +131,11 @@ def detect_postion_markers(frame):
             all_strings.append(key)
             if key.startswith("marker:"):
                 k=key[9:]
+                k2=key[7:9]
                 if k not in position_markers:
                     position_markers[k]={}
-                position_markers[k][7:9]=qrcode.rect
+                position_markers[k][k2]=qrcode.rect
+    all_strings.sort()
     return (position_markers,all_strings)
 
 def detect_angle(frame):
@@ -195,7 +222,10 @@ def read_from_camera(videodevicenum):
             img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             (position_markers,strings)=detect_postion_markers(img_gray)
-            print(position_markers,strings)
+            for key in position_markers.keys():
+                harea=get_hmarker_area(position_markers[key])
+                varea=get_vmarker_area(position_markers[key])
+                print(harea,varea)
             cv2.imshow('toyomr scan image', frame)            
             # quit
             keyinput=cv2.waitKey(1)
