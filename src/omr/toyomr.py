@@ -94,6 +94,38 @@ def detect_marker_box(frame,targetkeys=None):
     return ans
 
 
+def detect_hmarker_position(frame,marker_areas):
+    """
+    returns dict of list of (x, y1, y2)
+    """
+    ans = {}
+    for ((x1,x2),(y1,y2)) in marker_areas:
+        area = frame[y1:y2,x1:x2]
+        value = decode(area, symbols=[ZBarSymbol.CODE39])
+        if value:
+            for barcode in value:
+                key = barcode.data.decode('utf-8')
+                if key not in ans:
+                    ans[key]=[]
+                ans[key].append((barcode.rect.left+x1,barcode.rect.top+y1,barcode.rect.top+y1+barcode.rect.height))
+    return ans
+        
+def detect_vmarker_position(frame,marker_areas):
+    """
+    returns dict of list of (y, x1, x2)
+    """
+    ans = {}
+    for ((x1,x2),(y1,y2)) in marker_areas:
+        area = frame[y1:y2,x1:x2]
+        value = decode(area, symbols=[ZBarSymbol.CODE39])
+        if value:
+            for barcode in value:
+                key = barcode.data.decode('utf-8')
+                if key not in ans:
+                    ans[key]=[]
+                ans[key].append((barcode.rect.top+y1,barcode.rect.left+x1,barcode.rect.left+x1+barcode.rect.width))
+    return ans
+        
 def get_hmarker_area(position_markers):
     ans =[]
     keys = [ k for k in position_markers.keys() if "E" in k ]
@@ -225,7 +257,9 @@ def read_from_camera(videodevicenum):
             for key in position_markers.keys():
                 harea=get_hmarker_area(position_markers[key])
                 varea=get_vmarker_area(position_markers[key])
-                print(harea,varea)
+                hmarkers=detect_hmarker_position(img_gray,harea)
+                vmarkers=detect_vmarker_position(img_gray,varea)
+                print(hmarkers,vmarkers)
             cv2.imshow('toyomr scan image', frame)            
             # quit
             keyinput=cv2.waitKey(1)
