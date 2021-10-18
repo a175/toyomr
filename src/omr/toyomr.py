@@ -1,3 +1,4 @@
+import sys
 import cv2
 from pyzbar.pyzbar import decode, ZBarSymbol
 import math
@@ -148,6 +149,30 @@ def detect_position_marker(frame):
         return None
 
 
+def read_from_camera(videodevicenum):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cap = cv2.VideoCapture(videodevicenum)
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if ret:
+            img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            degrees=detect_position_marker(img_gray)
+            cv2.imshow('toyomr scan image', frame)            
+            # quit
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+    cap.release()
 
 
+def main():
+    if len(sys.argv) < 2:
+        usage="{:s} devicenum".format(sys.argv[0])
+        print(usage)
+        return
+    videodevicenum = int(sys.argv[1])
+    read_from_camera(videodevicenum)
 
+
+if __name__ == "__main__":
+    main()
