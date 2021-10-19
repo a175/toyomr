@@ -250,9 +250,10 @@ class OMRbase:
         return ans
 
 class OMR4Camera(OMRbase):
-    def __init__(self,cap):
+    def __init__(self,cap,questions):
         self.cap=cap
-
+        self.questions = questions
+        
     def modify_angle(self,frame,default_rotation_mat,default_rotaion_90):
         img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         degrees=self.detect_angle(img_gray)
@@ -303,16 +304,65 @@ class OMR4Camera(OMRbase):
             k=self.get_key_of_marking_box_at(x,y)
             if k != None:
                 self.toggle_data(k)
+
+    def update_marking_boxes(self,marking_boxes):
+        for k in marking_boxes.keys():
+            self.marking_boxes[k]=marking_boxes[k]
+
+    def update_detected_strings(self,strings):
+        for k in strings:
+            if k not in self.detected_strings:
+                self.detected_strings.append(k)
+                self.detected_strings.sort()
+
+    def update_detected_data(self,marked_keys):
+        for k in marked_keys:
+            if k in self.fixed_keys:
+                continue
+            if k in self.detected_data:
+                continue
+            self.detected_data.append(k)
+
     def reset_detected_data(self):
         self.fixed_keys = []
         self.detected_data = []
         self.detected_strings = []
         self.marking_boxes = {}
 
-        
+    def draw_detected_data(self,frame):
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        for k in self.marking_boxes.keys():
+            (x1,x2,y1,y2)=self.marking_boxes[k]
+            if k in self.fixed_keys:
+                frame=cv2.line(frame,(x1,y1),(x2,y2),(256,128,128),2)
+            if k in self.detected_data:
+                frame = cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,0),2)
+                frame = cv2.putText(frame,"{:s}-{:s}".format(k[0],k[1]),(x1,y1-6),font,.3,(255,0,255),1,cv2.LINE_AA)
+            else:
+                frame = cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,255),1)
+        s="/".join([ k for k in self.detected_strings if not k.startswith("marker:")])
+        frame=cv2.putText(frame,s,(0,30),font,1.0,(255,255,255),4,cv2.LINE_AA)
+        frame=cv2.putText(frame,s,(0,30),font,1.0,(64,64,128),2,cv2.LINE_AA)
+        return frame
+
+    def draw_markers(self,frame,position_markers,hmarkers,vmarkers):
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        for k in position_markers.keys():
+            (x,y,w,h) = position_markers[k]
+            frame=cv2.rectangle(frame,(x,y),(x+w,y+h),(0,255,0),1)
+            frame=cv2.putText(frame,k,(x,y-6),font,.3,(255,0,0),1,cv2.LINE_AA)
+        for k in hmarkers.keys():
+            for (d,a,b) in hmarkers[k]:
+                frame=cv2.line(frame,(d,a),(d,b),(128,128,0),4)
+                frame=cv2.putText(frame,k,(d+10,a+6),font,.3,(255,0,255),1,cv2.LINE_AA)
+        for k in vmarkers.keys():
+            for (d,a,b) in vmarkers[k]:
+                frame=cv2.line(frame,(a,d),(b,d),(128,128,0),4)
+                frame=cv2.putText(frame,k,(a,d-6),font,.3,(255,0,255),1,cv2.LINE_AA)
+        return frame
+
     def detect_with_gui(self):
         font = cv2.FONT_HERSHEY_SIMPLEX
-        
         rotation_mat = cv2.getRotationMatrix2D((0,0),0, 1)
         needs_rotate_90 = False
         self.reset_detected_data()
@@ -322,49 +372,15 @@ class OMR4Camera(OMRbase):
                 (frame,rotation_mat,needs_rotate_90)=self.modify_angle(frame,rotation_mat,needs_rotate_90)
                 img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 (position_markers,strings)=self.detect_postion_markers(img_gray)
-                for k in strings:
-                    if k not in self.detected_strings:
-                        self.detected_strings.append(k)
-                        self.detected_strings.sort()
-                for key in position_markers.keys():
-                    
+                self.update_detected_strings(strings)
+                for key in position_markers.keys():                    
                     (marked_keys,marking_boxes,ignored_keys,(hmarkers,vmarkers))=self.try_to_detect(img_gray,position_markers[key])
-                    for k in marking_boxes.keys():
-                        self.marking_boxes[k]=marking_boxes[k]
-                    for k in marked_keys:
-                        if k in self.fixed_keys:
-                            continue
-                        if k in self.detected_data:
-                            continue
-                        self.detected_data.append(k)
-                    for k in position_markers[key]:
-                        x, y, w, h = position_markers[key][k]
-                        frame=cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 1)
-                        frame = cv2.putText(frame,k,(x, y-6),font,.3, (255, 0, 0), 1, cv2.LINE_AA)
+                    self.update_detected_data(marked_keys)
+                    self.update_marking_boxes(marking_boxes)
 
-                    for k in hmarkers.keys():
-                        for (d,a,b) in hmarkers[k]:
-                            frame=cv2.line(frame, (d, a), (d,b), (128, 128, 0), 4)
-                            frame = cv2.putText(frame,k, (d+10,a+6), font, .3, (255, 0, 255), 1, cv2.LINE_AA)
-                    for k in vmarkers.keys():
-                        for (d,a,b) in vmarkers[k]:
-                            frame=cv2.line(frame, (a, d), (b,d), (128, 128, 0), 4)
-                            frame = cv2.putText(frame,k, (a,d-6), font, .3, (255, 0, 255), 1, cv2.LINE_AA)
+                    frame = self.draw_markers(frame,position_markers[key],hmarkers,vmarkers)
 
-                for k in self.marking_boxes.keys():
-                    (x1,x2,y1,y2)=self.marking_boxes[k]
-                    if k in self.fixed_keys:
-                        frame=cv2.line(frame,(x1,y1),(x2,y2),(256,128,128),2)
-
-                    if k in self.detected_data:
-                        frame = cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
-                        frame = cv2.putText(frame, "{:s}-{:s}".format(k[0],k[1]), (x1, y1-6), font, .3, (255, 0, 255), 1, cv2.LINE_AA)
-                    else:
-                        frame = cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
-                s="/".join([ k for k in self.detected_strings if not k.startswith("marker:")])
-                frame=cv2.putText(frame,s,(0,30),font,1.0, (255,255,255), 4, cv2.LINE_AA)
-                frame=cv2.putText(frame,s,(0,30),font,1.0, (64,64,128), 2, cv2.LINE_AA)
-
+                frame=self.draw_detected_data(frame)
                 cv2.imshow('toyomr scan image', frame)
                 cv2.setMouseCallback('toyomr scan image',self.mous_event_call_back)
                 # quit
@@ -384,7 +400,6 @@ class OMR4Camera(OMRbase):
                     self.detected_strings.sort()
                     print(self.detected_data,self.detected_strings)
 
-        
 
 
 
@@ -399,8 +414,15 @@ def main():
         print(usage)
         return
     videodevicenum = int(sys.argv[1])
+    question = [ [(chr(ord("A")+i),"{:d}{:d}".format(j,k))  for k in range(1,5)] for j in range(1,6) for i in range(10)]
+    question_a = [[ (qij,"{:d}".format(j+1)) for (j,qij) in enumerate(qi) ] for qi in question]
+    a=[["0","1","2","3","4","5","6"],["7","8","9","A"],["B","C","D"],["E","F"]]
+    b=[["G","H","I"],["J","K","L","M"],["N","O"],["P","Q","R"]]
+    question =[[("Y",aij) for aij in ai] for ai in a]+[ [("Z",bij) for bij in bi]for bi in b]
+    question_b = [[ (qij,"{:d}".format(j+1)) for (j,qij) in enumerate(qi) ] for qi in question]
+    questions = {"B":question_a,"A":question_b}
     cap = cv2.VideoCapture(videodevicenum)
-    omr = OMR4Camera(cap)
+    omr = OMR4Camera(cap,questions)
     omr.detect_with_gui()
     cap.release()
 
