@@ -4,6 +4,164 @@ from pyzbar.pyzbar import decode, ZBarSymbol
 import math
 import numpy as np
 
+class OMRbase:
+    def detect_postion_markers(self,frame):
+        """
+        returns pair of dict D and list L, D[k1][k2] is rect of qrcode for problem k1 at k2, L is list of strings for all qrcodes. 
+        """
+        value = decode(frame, symbols=[ZBarSymbol.QRCODE])
+        all_strings = []
+        position_markers = {}
+        if value:
+            for qrcode in value:
+                key = qrcode.data.decode('utf-8')
+                all_strings.append(key)
+                if key.startswith("marker:"):
+                    k=key[9:]
+                    k2=key[7:9]
+                    if k not in position_markers:
+                        position_markers[k]={}
+                    position_markers[k][k2]=qrcode.rect
+        all_strings.sort()
+        return (position_markers,all_strings)
+
+
+class OMR4Camera(OMRbase):
+    def __init__(self,cap):
+        self.cap=cap
+
+    def modify_angle(self,frame,default_rotation_mat,default_rotaion_90):
+        img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        degrees=detect_angle(img_gray)
+        if degrees != None:
+            if (45 < degrees % 180 and degrees % 180  < 135) :
+                needs_rotate_90=True
+                degrees=degrees+90
+                (w,h)=img_gray.shape
+            else:
+                needs_rotate_90=False
+                (h,w)=img_gray.shape
+            rotation_mat = cv2.getRotationMatrix2D((w/2,h/2), degrees, 1)
+        else:
+            rotation_mat = default_rotation_mat
+            needs_rotate_90 = default_rotaion_90
+        if needs_rotate_90:                
+            frame=cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        (h,w,c)=frame.shape
+        return (cv2.warpAffine(frame,rotation_mat,(w,h)),rotation_mat,needs_rotate_90)
+
+    def try_to_detect(self,img_gray,position_markers_for_question):
+        harea=get_hmarker_area(position_markers_for_question)
+        varea=get_vmarker_area(position_markers_for_question)
+        hmarkers=detect_hmarker_position(img_gray,harea)
+        vmarkers=detect_vmarker_position(img_gray,varea)
+        (hmarkers_fallback,vmarkers_fallback)=detect_hmarker_and_vmarker_position_globally(img_gray)
+        (marking_boxes,ignored_keys)=get_marking_boxes(vmarkers,hmarkers,vmarkers_fallback,hmarkers_fallback,target_keys=None)
+        marked_keys=detect_marked_keys(img_gray, marking_boxes)
+        return (marked_keys,marking_boxes,ignored_keys,(hmarkers,vmarkers))
+
+    def get_key_of_marking_box_at(self,x,y):
+        for k in self.marking_boxes.keys():
+            (x1,x2,y1,y2)=self.marking_boxes[k]
+            if  x1<x and x<x2 and y1<y and  y < y2:
+                return k
+        return None
+    
+    def toggle_data(self,k):
+        if k in self.detected_data:
+            self.fixed_keys.append(k)
+            self.detected_data= [x for x in self.detected_data if k != x]
+        else:
+            self.fixed_keys.append(k)
+            self.detected_data.append(k)
+            
+    def mous_event_call_back(self,event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            k=self.get_key_of_marking_box_at(x,y)
+            if k != None:
+                self.toggle_data(k)
+    def reset_detected_data(self):
+        self.fixed_keys = []
+        self.detected_data = []
+        self.detected_strings = []
+        self.marking_boxes = {}
+
+        
+    def detect_with_gui(self):
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        
+        rotation_mat = cv2.getRotationMatrix2D((0,0),0, 1)
+        needs_rotate_90 = False
+        self.reset_detected_data()
+        while self.cap.isOpened():
+            (ret, frame) = self.cap.read()
+            if ret:
+                (frame,rotation_mat,needs_rotate_90)=self.modify_angle(frame,rotation_mat,needs_rotate_90)
+                img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                (position_markers,strings)=self.detect_postion_markers(img_gray)
+                for k in strings:
+                    if k not in self.detected_strings:
+                        self.detected_strings.append(k)
+                        self.detected_strings.sort()
+                for key in position_markers.keys():
+                    
+                    (marked_keys,marking_boxes,ignored_keys,(hmarkers,vmarkers))=self.try_to_detect(img_gray,position_markers[key])
+                    for k in marking_boxes.keys():
+                        self.marking_boxes[k]=marking_boxes[k]
+                    for k in marked_keys:
+                        if k in self.fixed_keys:
+                            continue
+                        if k in self.detected_data:
+                            continue
+                        self.detected_data.append(k)
+                    for k in position_markers[key]:
+                        x, y, w, h = position_markers[key][k]
+                        frame=cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 1)
+                        frame = cv2.putText(frame,k,(x, y-6),font,.3, (255, 0, 0), 1, cv2.LINE_AA)
+
+                    for k in hmarkers.keys():
+                        for (d,a,b) in hmarkers[k]:
+                            frame=cv2.line(frame, (d, a), (d,b), (128, 128, 0), 4)
+                            frame = cv2.putText(frame,k, (d+10,a+6), font, .3, (255, 0, 255), 1, cv2.LINE_AA)
+                    for k in vmarkers.keys():
+                        for (d,a,b) in vmarkers[k]:
+                            frame=cv2.line(frame, (a, d), (b,d), (128, 128, 0), 4)
+                            frame = cv2.putText(frame,k, (a,d-6), font, .3, (255, 0, 255), 1, cv2.LINE_AA)
+
+                for k in self.marking_boxes.keys():
+                    (x1,x2,y1,y2)=self.marking_boxes[k]
+                    if k in self.fixed_keys:
+                        frame=cv2.line(frame,(x1,y1),(x2,y2),(256,128,128),2)
+
+                    if k in self.detected_data:
+                        frame = cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
+                        frame = cv2.putText(frame, "{:s}-{:s}".format(k[0],k[1]), (x1, y1-6), font, .3, (255, 0, 255), 1, cv2.LINE_AA)
+                    else:
+                        frame = cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
+                s="/".join([ k for k in self.detected_strings if not k.startswith("marker:")])
+                frame=cv2.putText(frame,s,(0,30),font,1.0, (255,255,255), 4, cv2.LINE_AA)
+                frame=cv2.putText(frame,s,(0,30),font,1.0, (64,64,128), 2, cv2.LINE_AA)
+
+                cv2.imshow('toyomr scan image', frame)
+                cv2.setMouseCallback('toyomr scan image',self.mous_event_call_back)
+                # quit
+                keyinput=cv2.waitKey(1)
+                if keyinput & 0xFF == ord('q'):
+                    break
+                elif keyinput & 0xFF == ord('a'):
+                    break
+                elif keyinput & 0xFF == ord(' '):
+                    self.reset_detected_data()
+                elif keyinput & 0xFF == 27:
+                    #ESC
+                    break
+                elif keyinput & 0xFF == 13:
+                    #enter
+                    self.detected_data.sort()
+                    self.detected_strings.sort()
+                    print(self.detected_data,self.detected_strings)
+
+        
 def norm_squared(a,b):
     """
     returns the square of norm of vectors a, b.
@@ -32,67 +190,84 @@ def get_th_by_2mean(data):
            return th
     return th
 
-def detect_marked_marker_box(frame, targetbox):
+
+
+def detect_marked_keys(frame, targetboxes):
     """
     returns the list of keys of marked boxes 
     INPUT:
     frame - gray scale image
-    targetbox - dictionary of cordinates  ((x1,y1),(x2,y2)) of boxes with northwest point (x1,y1) and southeast point (x2,y2).
+    targetboxes - dictionary of cordinates (x1,x2,y1,y2) of boxes with northwest point (x1,y1) and southeast point (x2,y2).
     """
     frame = cv2.GaussianBlur(frame,(5,5),0)
-    if len(targetbox) == 0:
+    if len(targetboxes) == 0:
         return []
     data = []
 
-    #for k in targetbox.keys():
-    #    ((x1,y1),(x2,y2)) =targetbox[k]
+    #for k in targetboxes.keys():
+    #    (x1,x2,y1,y2) =targetboxes[k]
     #    data.extend(np.ravel(frame[y1:y2,x1:x2]))
     #th =get_th_by_2mean(data)
     #(res,frame) = cv2.threshold(frame,th,255, cv2.THRESH_BINARY)
+    
     frame = 255 - frame
 
     score={}
-    for k in targetbox.keys():
-        ((x1,y1),(x2,y2)) =targetbox[k]
+    for k in targetboxes.keys():
+        (x1,x2,y1,y2) =targetboxes[k]
         score[k]=np.sum(frame[y1:y2,x1:x2])/((x2-x1)*(y2-y1))
-        print((x2-x1)*(y2-y1))
     th=get_th_by_2mean(score.values())
     ans = [k for k in score.keys() if score[k] > th]
     return ans
 
-def detect_marker_box(frame,targetkeys=None):
+
+def get_marking_boxes(vmarkers,hmarkers,vmarkers_fallback,hmarkers_fallback,target_keys=None):
+    if target_keys == None:
+        target_keys = [(k1,k2) for k1 in vmarkers.keys() for k2 in hmarkers.keys()]
+
+    ans = {}
+    ignored_keys = []
+    for (k1,k2) in target_keys:
+        if k1 in vmarkers:
+            x1 = min(a for (d,a,b) in vmarkers[k1])
+            x2 = max(b for (d,a,b) in vmarkers[k1])
+        elif k1 in vmarkers_fallback:
+            x1 = min(a for (d,a,b) in vmarkers_fallback[k1])
+            x2 = max(b for (d,a,b) in vmarkers_fallback[k1])
+        else:
+            ignored_keys.append((k1,k2))
+            continue
+        if k2 in hmarkers:
+            y1 = min(a for (d,a,b) in hmarkers[k2])
+            y2 = max(b for (d,a,b) in hmarkers[k2])
+        elif k2 in hmarkers_fallback:
+            y1 = min(a for (d,a,b) in hmarkers_fallback[k2])
+            y2 = max(b for (d,a,b) in hmarkers_fallback[k2])
+        else:
+            ignored_keys.append((k1,k2))
+            continue
+        ans[(k1,k2)]=(x1,x2,y1,y2)
+    return (ans,ignored_keys)
+
+def detect_hmarker_and_vmarker_position_globally(frame):
     """
-    return the coodinates of boxes containing marker.
-    INPUT:
-    frame - image
-    targetkeys -  list of pairs of keys of virtical barcode (for x-coordinate) and horizontal barcode (for y-coodinate).
+    returns pair of dicts, for fallback.
     """
     value = decode(frame, symbols=[ZBarSymbol.CODE39])
-    data={}
+    hmarkers={}
+    vmarkers={}
     if value:
         for barcode in value:
             key = barcode.data.decode('utf-8')
-            data[key]=barcode.rect
-    
-    if targetkeys == None:
-        vmarker=[]
-        hmarker=[]
-        for k in data.keys():
-            (x, y, w, h) = data[k]
-            if w < h:
-                if w > 0:
-                    vmarker.append(k)
-            else:
-                if h > 0:
-                    hmarker.append(k)
-        targetkeys = [ (k1,k2) for k1 in vmarker for k2 in hmarker ]
-    else:
-        targetkeys = [ (k1,k2) for (k1,k2) in targetkeys if k1 in data and k2 in data] 
-    ans = {}
-    for (k1,k2) in targetkeys:
-        ans[(k1,k2)] = ((data[k1][0],data[k2][1]),(data[k1][0]+data[k1][2],data[k2][1]+data[k2][3]))  
-    return ans
-
+            if barcode.rect.height != 0:
+                if key not in hmarkers:
+                    hmarkers[key]=[]
+                hmarkers[key].append((barcode.rect.left,barcode.rect.top,barcode.rect.top+barcode.rect.height))
+            if barcode.rect.width != 0:
+                if key not in vmarkers:
+                    vmarkers[key]=[]
+                vmarkers[key].append((barcode.rect.top,barcode.rect.left,barcode.rect.left+barcode.rect.width))
+    return (hmarkers,vmarkers)
 
 def detect_hmarker_position(frame,marker_areas):
     """
@@ -105,6 +280,8 @@ def detect_hmarker_position(frame,marker_areas):
         if value:
             for barcode in value:
                 key = barcode.data.decode('utf-8')
+                if barcode.rect.height == 0:
+                    continue
                 if key not in ans:
                     ans[key]=[]
                 ans[key].append((barcode.rect.left+x1,barcode.rect.top+y1,barcode.rect.top+y1+barcode.rect.height))
@@ -121,6 +298,8 @@ def detect_vmarker_position(frame,marker_areas):
         if value:
             for barcode in value:
                 key = barcode.data.decode('utf-8')
+                if barcode.rect.width == 0:
+                    continue
                 if key not in ans:
                     ans[key]=[]
                 ans[key].append((barcode.rect.top+y1,barcode.rect.left+x1,barcode.rect.left+x1+barcode.rect.width))
@@ -149,26 +328,6 @@ def get_vmarker_area(position_markers):
         n = max( position_markers[k].top+position_markers[k].height for k in keys)
         ans.append(((0,-1),(0,n)))
     return ans
-
-def detect_postion_markers(frame):
-    """
-    returns pair of dict D and list L, D[k1][k2] is rect of qrcode for problem k1 at k2, L is list of strings for all qrcodes. 
-    """
-    value = decode(frame, symbols=[ZBarSymbol.QRCODE])
-    all_strings = []
-    position_markers = {}
-    if value:
-        for qrcode in value:
-            key = qrcode.data.decode('utf-8')
-            all_strings.append(key)
-            if key.startswith("marker:"):
-                k=key[9:]
-                k2=key[7:9]
-                if k not in position_markers:
-                    position_markers[k]={}
-                position_markers[k][k2]=qrcode.rect
-    all_strings.sort()
-    return (position_markers,all_strings)
 
 def detect_angle(frame):
     """
@@ -226,63 +385,23 @@ def detect_angle(frame):
         return None
 
 
-def read_from_camera(videodevicenum):
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    cap = cv2.VideoCapture(videodevicenum)
-
-    rotation_mat = cv2.getRotationMatrix2D((0,0),0, 1)
-    needs_rotate_90 = False
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if ret:
-            img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            degrees=detect_angle(img_gray)
-            if degrees != None:
-                if (45 < degrees and degrees < 135) or (-135 < degrees and degrees < -45):
-                    needs_rotate_90=True
-                    degrees=degrees+90
-                    (w,h)=img_gray.shape
-                else:
-                    needs_rotate_90=False
-                    (h,w)=img_gray.shape
-                rotation_mat = cv2.getRotationMatrix2D((w/2,h/2), degrees, 1)
-
-            if needs_rotate_90:                
-                frame=cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-            (h,w,c)=frame.shape
-            frame=cv2.warpAffine(frame,rotation_mat,(w,h))
-            img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            (position_markers,strings)=detect_postion_markers(img_gray)
-            for key in position_markers.keys():
-                harea=get_hmarker_area(position_markers[key])
-                varea=get_vmarker_area(position_markers[key])
-                hmarkers=detect_hmarker_position(img_gray,harea)
-                vmarkers=detect_vmarker_position(img_gray,varea)
-                print(hmarkers,vmarkers)
-            cv2.imshow('toyomr scan image', frame)            
-            # quit
-            keyinput=cv2.waitKey(1)
-            if keyinput & 0xFF == ord('q'):
-                break
-            elif keyinput & 0xFF == ord('a'):
-                break
-            elif keyinput & 0xFF == ord(' '):
-                break
-            elif keyinput & 0xFF == 27:
-                #ESC
-                break
-
-    cap.release()
 
 
+
+
+
+
+    
 def main():
     if len(sys.argv) < 2:
         usage="{:s} devicenum".format(sys.argv[0])
         print(usage)
         return
     videodevicenum = int(sys.argv[1])
-    read_from_camera(videodevicenum)
+    cap = cv2.VideoCapture(videodevicenum)
+    omr = OMR4Camera(cap)
+    omr.detect_with_gui()
+    cap.release()
 
 
 if __name__ == "__main__":
