@@ -45,7 +45,7 @@ class OMRbase:
                 key = qrcode.data.decode('utf-8')
                 all_strings.append(key)
                 if key.startswith("marker:"):
-                    k=key[9:]
+                    k=key[10:]
                     k2=key[7:9]
                     if k not in position_markers:
                         position_markers[k]={}
@@ -253,6 +253,26 @@ class OMR4Camera(OMRbase):
     def __init__(self,cap,questions):
         self.cap=cap
         self.questions = questions
+
+    def get_detected_answers_for_questions_as_csv_lines(self):
+        ans = []
+        (answers,strings) = self.get_detected_answers_for_questions()
+        s=",".join([si for si in strings if not si.startswith("marker:")])
+        for questionid in answers.keys():
+            m=",".join(["&".join(qi) for qi in answers[questionid]])
+            d=questionid+','+m+','+s
+            ans.append(d)
+        return ans
+    def get_detected_answers_for_questions(self):
+        strings = self.detected_strings[:]
+        strings.sort()
+        ans = {}
+        for questionid in self.questions.keys():
+            if questionid not in self.detected_data:
+                continue
+            marked_keys=self.detected_data[questionid]
+            ans[questionid]=[[a for (k,a) in qi if k in marked_keys] for qi in self.questions[questionid]]
+        return(ans,strings)
         
     def modify_angle(self,frame,default_rotation_mat,default_rotaion_90):
         img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -306,7 +326,7 @@ class OMR4Camera(OMRbase):
     def mous_event_call_back(self,event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             key=self.get_key_of_marking_box_at(x,y)
-            if k != None:
+            if key != None:
                 self.toggle_data(key)
 
     def update_marking_boxes(self,questionid,marking_boxes):
@@ -409,7 +429,8 @@ class OMR4Camera(OMRbase):
                     #enter
                     #self.detected_data.sort()
                     #self.detected_strings.sort()
-                    print(self.detected_data,self.detected_strings)
+
+                    print(self.get_detected_answers_for_questions_as_csv_lines())
 
 
 
