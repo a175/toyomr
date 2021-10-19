@@ -285,29 +285,35 @@ class OMR4Camera(OMRbase):
         return (marked_keys,marking_boxes,ignored_keys,(hmarkers,vmarkers))
 
     def get_key_of_marking_box_at(self,x,y):
-        for k in self.marking_boxes.keys():
-            (x1,x2,y1,y2)=self.marking_boxes[k]
-            if  x1<x and x<x2 and y1<y and  y < y2:
-                return k
+        for questionid in self.marking_boxes.keys():
+            for k in self.marking_boxes.keys[questionid]():
+                (x1,x2,y1,y2)=self.marking_boxes[questionid][k]
+                if  x1<x and x<x2 and y1<y and  y < y2:
+                    return (questionid,k)
         return None
     
-    def toggle_data(self,k):
-        if k in self.detected_data:
-            self.fixed_keys.append(k)
-            self.detected_data= [x for x in self.detected_data if k != x]
+    def toggle_data(self,questionid,key):
+        (questionid,k)=key
+        if questionid not in self.fixed_keys:
+            self.fixed_keys[questionid] = []
+        if k in self.fixed_keys[questionid]:
+            self.fixed_keys[questionid].append(k)
+        if k in self.detected_data[questionid]:
+            self.detected_data[questionid]= [x for x in self.detected_data[questionid] if k != x]
         else:
-            self.fixed_keys.append(k)
-            self.detected_data.append(k)
+            self.detected_data[questionid].append(k)
             
     def mous_event_call_back(self,event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
-            k=self.get_key_of_marking_box_at(x,y)
+            key=self.get_key_of_marking_box_at(x,y)
             if k != None:
-                self.toggle_data(k)
+                self.toggle_data(key)
 
-    def update_marking_boxes(self,marking_boxes):
+    def update_marking_boxes(self,questionid,marking_boxes):
+        if questionid not in self.marking_boxes:
+            self.marking_boxes[questionid]={}
         for k in marking_boxes.keys():
-            self.marking_boxes[k]=marking_boxes[k]
+            self.marking_boxes[questionid][k]=marking_boxes[k]
 
     def update_detected_strings(self,strings):
         for k in strings:
@@ -315,31 +321,36 @@ class OMR4Camera(OMRbase):
                 self.detected_strings.append(k)
                 self.detected_strings.sort()
 
-    def update_detected_data(self,marked_keys):
+    def update_detected_data(self,questionid,marked_keys):
+        if questionid not in self.detected_data:
+            self.detected_data[questionid]=[]
+        if questionid not in self.fixed_keys:
+            self.fixed_keys[questionid]=[]
         for k in marked_keys:
-            if k in self.fixed_keys:
+            if k in self.fixed_keys[questionid]:
                 continue
-            if k in self.detected_data:
+            if k in self.detected_data[questionid]:
                 continue
-            self.detected_data.append(k)
+            self.detected_data[questionid].append(k)
 
     def reset_detected_data(self):
-        self.fixed_keys = []
-        self.detected_data = []
         self.detected_strings = []
+        self.fixed_keys = {}
+        self.detected_data = {}
         self.marking_boxes = {}
 
     def draw_detected_data(self,frame):
         font = cv2.FONT_HERSHEY_SIMPLEX
-        for k in self.marking_boxes.keys():
-            (x1,x2,y1,y2)=self.marking_boxes[k]
-            if k in self.fixed_keys:
-                frame=cv2.line(frame,(x1,y1),(x2,y2),(256,128,128),2)
-            if k in self.detected_data:
-                frame = cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,0),2)
-                frame = cv2.putText(frame,"{:s}-{:s}".format(k[0],k[1]),(x1,y1-6),font,.3,(255,0,255),1,cv2.LINE_AA)
-            else:
-                frame = cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,255),1)
+        for questionid in self.marking_boxes.keys():
+            for k in self.marking_boxes[questionid].keys():
+                (x1,x2,y1,y2)=self.marking_boxes[questionid][k]
+                if k in self.fixed_keys[questionid]:
+                    frame=cv2.line(frame,(x1,y1),(x2,y2),(256,128,128),2)
+                if k in self.detected_data[questionid]:
+                    frame=cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,0),2)
+                    frame=cv2.putText(frame,"{:s}-{:s}".format(k[0],k[1]),(x1,y1-6),font,.3,(255,0,255),1,cv2.LINE_AA)
+                else:
+                    frame=cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,255),1)
         s="/".join([ k for k in self.detected_strings if not k.startswith("marker:")])
         frame=cv2.putText(frame,s,(0,30),font,1.0,(255,255,255),4,cv2.LINE_AA)
         frame=cv2.putText(frame,s,(0,30),font,1.0,(64,64,128),2,cv2.LINE_AA)
@@ -375,8 +386,8 @@ class OMR4Camera(OMRbase):
                 self.update_detected_strings(strings)
                 for key in position_markers.keys():                    
                     (marked_keys,marking_boxes,ignored_keys,(hmarkers,vmarkers))=self.try_to_detect(img_gray,position_markers[key])
-                    self.update_detected_data(marked_keys)
-                    self.update_marking_boxes(marking_boxes)
+                    self.update_detected_data(key,marked_keys)
+                    self.update_marking_boxes(key,marking_boxes)
 
                     frame = self.draw_markers(frame,position_markers[key],hmarkers,vmarkers)
 
@@ -396,8 +407,8 @@ class OMR4Camera(OMRbase):
                     break
                 elif keyinput & 0xFF == 13:
                     #enter
-                    self.detected_data.sort()
-                    self.detected_strings.sort()
+                    #self.detected_data.sort()
+                    #self.detected_strings.sort()
                     print(self.detected_data,self.detected_strings)
 
 
