@@ -306,17 +306,17 @@ class OMR4Camera(OMRbase):
 
     def get_key_of_marking_box_at(self,x,y):
         for questionid in self.marking_boxes.keys():
-            for k in self.marking_boxes.keys[questionid]():
+            for k in self.marking_boxes[questionid].keys():
                 (x1,x2,y1,y2)=self.marking_boxes[questionid][k]
                 if  x1<x and x<x2 and y1<y and  y < y2:
                     return (questionid,k)
         return None
     
-    def toggle_data(self,questionid,key):
+    def toggle_data(self,key):
         (questionid,k)=key
         if questionid not in self.fixed_keys:
             self.fixed_keys[questionid] = []
-        if k in self.fixed_keys[questionid]:
+        if k not in self.fixed_keys[questionid]:
             self.fixed_keys[questionid].append(k)
         if k in self.detected_data[questionid]:
             self.detected_data[questionid]= [x for x in self.detected_data[questionid] if k != x]
