@@ -253,7 +253,9 @@ class OMR4Camera(OMRbase):
     def __init__(self,cap,questions):
         self.cap=cap
         self.questions = questions
-
+        self.target_keys = {}
+        for questionid in questions:
+            self.target_keys[questionid]=[k for qi in questions[questionid] for (k,a) in qi]
     def get_detected_answers_for_questions_as_csv_lines(self):
         ans = []
         (answers,strings) = self.get_detected_answers_for_questions()
@@ -294,13 +296,13 @@ class OMR4Camera(OMRbase):
         (h,w,c)=frame.shape
         return (cv2.warpAffine(frame,rotation_mat,(w,h)),rotation_mat,needs_rotate_90)
 
-    def try_to_detect(self,img_gray,position_markers_for_question):
+    def try_to_detect(self,img_gray,position_markers_for_question,target_keys_for_question):
         harea=self.get_hmarker_area(position_markers_for_question)
         varea=self.get_vmarker_area(position_markers_for_question)
         hmarkers=self.detect_hmarker_position(img_gray,harea)
         vmarkers=self.detect_vmarker_position(img_gray,varea)
         (hmarkers_fallback,vmarkers_fallback)=self.detect_hmarker_and_vmarker_position_globally(img_gray)
-        (marking_boxes,ignored_keys)=self.get_marking_boxes(vmarkers,hmarkers,vmarkers_fallback,hmarkers_fallback,target_keys=None)
+        (marking_boxes,ignored_keys)=self.get_marking_boxes(vmarkers,hmarkers,vmarkers_fallback,hmarkers_fallback,target_keys=target_keys_for_question)
         marked_keys=self.detect_marked_keys(img_gray, marking_boxes)
         return (marked_keys,marking_boxes,ignored_keys,(hmarkers,vmarkers))
 
@@ -308,7 +310,7 @@ class OMR4Camera(OMRbase):
         for questionid in self.marking_boxes.keys():
             for k in self.marking_boxes[questionid].keys():
                 (x1,x2,y1,y2)=self.marking_boxes[questionid][k]
-                if  x1<x and x<x2 and y1<y and  y < y2:
+                if  x1<=x and x<=x2 and y1<=y and  y <= y2:
                     return (questionid,k)
         return None
     
@@ -372,8 +374,8 @@ class OMR4Camera(OMRbase):
                 else:
                     frame=cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,255),1)
         s="/".join([ k for k in self.detected_strings if not k.startswith("marker:")])
-        frame=cv2.putText(frame,s,(0,30),font,1.0,(255,255,255),4,cv2.LINE_AA)
-        frame=cv2.putText(frame,s,(0,30),font,1.0,(64,64,128),2,cv2.LINE_AA)
+        frame=cv2.putText(frame,s,(0,70),font,1.0,(255,255,255),4,cv2.LINE_AA)
+        frame=cv2.putText(frame,s,(0,70),font,1.0,(64,64,128),2,cv2.LINE_AA)
         return frame
 
     def draw_markers(self,frame,position_markers,hmarkers,vmarkers):
@@ -396,20 +398,30 @@ class OMR4Camera(OMRbase):
         font = cv2.FONT_HERSHEY_SIMPLEX
         rotation_mat = cv2.getRotationMatrix2D((0,0),0, 1)
         needs_rotate_90 = False
+        is_sleeping = False
         self.reset_detected_data()
         while self.cap.isOpened():
             (ret, frame) = self.cap.read()
             if ret:
                 (frame,rotation_mat,needs_rotate_90)=self.modify_angle(frame,rotation_mat,needs_rotate_90)
-                img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                (position_markers,strings)=self.detect_postion_markers(img_gray)
-                self.update_detected_strings(strings)
-                for key in position_markers.keys():                    
-                    (marked_keys,marking_boxes,ignored_keys,(hmarkers,vmarkers))=self.try_to_detect(img_gray,position_markers[key])
-                    self.update_detected_data(key,marked_keys)
-                    self.update_marking_boxes(key,marking_boxes)
-
-                    frame = self.draw_markers(frame,position_markers[key],hmarkers,vmarkers)
+                if not is_sleeping:
+                    img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    (position_markers,strings)=self.detect_postion_markers(img_gray)
+                    self.update_detected_strings(strings)
+                    for qid in position_markers.keys():
+                        (marked_keys,marking_boxes,ignored_keys,(hmarkers,vmarkers))=self.try_to_detect(img_gray,position_markers[qid],self.target_keys[qid])
+                        self.update_detected_data(qid,marked_keys)
+                        self.update_marking_boxes(qid,marking_boxes)
+                        frame = self.draw_markers(frame,position_markers[qid],hmarkers,vmarkers)
+                if is_sleeping:
+                    s="Zzz..."
+                    frame=cv2.putText(frame,s,(0,30),font,1.0,(255,255,255),4,cv2.LINE_AA)
+                    frame=cv2.putText(frame,s,(0,30),font,1.0,(64,128,64),2,cv2.LINE_AA)
+                else:
+                    s="Detecting..."
+                    frame=cv2.putText(frame,s,(0,30),font,1.0,(255,255,255),4,cv2.LINE_AA)
+                    frame=cv2.putText(frame,s,(0,30),font,1.0,(64,128,64),2,cv2.LINE_AA)
+                    
 
                 frame=self.draw_detected_data(frame)
                 cv2.imshow('toyomr scan image', frame)
@@ -418,8 +430,8 @@ class OMR4Camera(OMRbase):
                 keyinput=cv2.waitKey(1)
                 if keyinput & 0xFF == ord('q'):
                     break
-                elif keyinput & 0xFF == ord('a'):
-                    break
+                elif keyinput & 0xFF == ord('z'):
+                    is_sleeping = not is_sleeping
                 elif keyinput & 0xFF == ord(' '):
                     self.reset_detected_data()
                 elif keyinput & 0xFF == 27:
