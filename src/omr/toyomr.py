@@ -244,7 +244,7 @@ class OMRbase:
         score={}
         for k in targetboxes.keys():
             (x1,x2,y1,y2) =targetboxes[k]
-            score[k]=np.sum(frame[y1:y2,x1:x2])/((x2-x1)*(y2-y1))
+            score[k]=np.mean(frame[y1:y2,x1:x2])
         th=self.get_th_by_2mean(score.values())
         ans = [k for k in score.keys() if score[k] > th]
         return ans
