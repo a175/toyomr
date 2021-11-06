@@ -3,6 +3,7 @@ import cv2
 from pyzbar.pyzbar import decode, ZBarSymbol
 import math
 import numpy as np
+import pdf2image
 
 class OMRbase:
     def norm_squared(self,a,b):
@@ -249,13 +250,13 @@ class OMRbase:
         ans = [k for k in score.keys() if score[k] > th]
         return ans
 
-class OMR4Camera(OMRbase):
-    def __init__(self,cap,questions):
-        self.cap=cap
-        self.questions = questions
+class InteractiveOMR(OMRbase):
+    def __init__(self,questions):
         self.target_keys = {}
         for questionid in questions:
             self.target_keys[questionid]=[k for qi in questions[questionid] for (k,a) in qi]
+    def detect_with_gui(self):
+        pass
     def get_detected_answers_for_questions_as_csv_lines(self):
         ans = []
         (answers,strings) = self.get_detected_answers_for_questions()
@@ -275,7 +276,7 @@ class OMR4Camera(OMRbase):
             marked_keys=self.detected_data[questionid]
             ans[questionid]=[[a for (k,a) in qi if k in marked_keys] for qi in self.questions[questionid]]
         return(ans,strings)
-        
+
     def modify_angle(self,frame,default_rotation_mat,default_rotaion_90):
         img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         degrees=self.detect_angle(img_gray)
@@ -369,10 +370,12 @@ class OMR4Camera(OMRbase):
                 if k in self.fixed_keys[questionid]:
                     frame=cv2.line(frame,(x1,y1),(x2,y2),(256,128,128),2)
                 if k in self.detected_data[questionid]:
+                    frame=cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,255),3)
                     frame=cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,0),2)
                     frame=cv2.putText(frame,"{:s}-{:s}".format(k[0],k[1]),(x1,y1-6),font,.3,(255,0,255),1,cv2.LINE_AA)
                 else:
-                    frame=cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,255),1)
+                    frame=cv2.rectangle(frame,(x1,y1),(x2,y2),(255,255,255),3)
+                    frame=cv2.rectangle(frame,(x1,y1),(x2,y2),(0,80,160),1)
         s="/".join([ k for k in self.detected_strings if not k.startswith("marker:")])
         frame=cv2.putText(frame,s,(0,70),font,1.0,(255,255,255),4,cv2.LINE_AA)
         frame=cv2.putText(frame,s,(0,70),font,1.0,(64,64,128),2,cv2.LINE_AA)
@@ -393,6 +396,69 @@ class OMR4Camera(OMRbase):
                 frame=cv2.line(frame,(a,d),(b,d),(128,128,0),4)
                 frame=cv2.putText(frame,k,(a,d-6),font,.3,(255,0,255),1,cv2.LINE_AA)
         return frame
+
+class OMR4Pdf(InteractiveOMR):
+    def __init__(self,filename,questions):
+        super().__init__(questions)
+        self.questions = questions
+        pdfimages = pdf2image.convert_from_path(filename)
+        self.scannedimages =  [ cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR) for image in pdfimages]
+
+
+
+
+    def detect_with_gui(self):
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        for pagenum,frame in enumerate(self.scannedimages):
+            rotation_mat = cv2.getRotationMatrix2D((0,0),0, 1)
+            needs_rotate_90 = False
+            self.reset_detected_data()
+            (frame,rotation_mat,needs_rotate_90)=self.modify_angle(frame,rotation_mat,needs_rotate_90)
+            img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            (position_markers,strings)=self.detect_postion_markers(img_gray)
+            self.update_detected_strings(strings)
+            for qid in position_markers.keys():
+                (marked_keys,marking_boxes,ignored_keys,(hmarkers,vmarkers))=self.try_to_detect(img_gray,position_markers[qid],self.target_keys[qid])
+                self.update_detected_data(qid,marked_keys)
+                self.update_marking_boxes(qid,marking_boxes)
+            frame_modified = frame
+            while True:
+                frame = frame_modified.copy()
+                s="Page: {:d}".format(pagenum+1)
+                frame=cv2.putText(frame,s,(0,30),font,1.0,(255,255,255),4,cv2.LINE_AA)
+                frame=cv2.putText(frame,s,(0,30),font,1.0,(64,128,64),2,cv2.LINE_AA)
+
+                for qid in position_markers.keys():
+                    frame = self.draw_markers(frame,position_markers[qid],hmarkers,vmarkers)
+                frame=self.draw_detected_data(frame)
+                cv2.imshow('toyomr scan image', frame)
+                cv2.setMouseCallback('toyomr scan image',self.mous_event_call_back)
+                # quit
+                keyinput=cv2.waitKey(1)
+                if keyinput & 0xFF == ord('q'):
+                    return
+                elif keyinput & 0xFF == ord('z'):
+                    is_sleeping = not is_sleeping
+                elif keyinput & 0xFF == ord(' '):
+                    break
+                elif keyinput & 0xFF == 27:
+                    #ESC
+                    return
+                elif keyinput & 0xFF == 13:
+                    #enter
+                    for li in self.get_detected_answers_for_questions_as_csv_lines():
+                        print(li)
+                    break
+
+class OMR4Camera(InteractiveOMR):
+    def __init__(self,cap,questions):
+        super().__init__(questions)
+        self.cap=cap
+        self.questions = questions
+        self.target_keys = {}
+        for questionid in questions:
+            self.target_keys[questionid]=[k for qi in questions[questionid] for (k,a) in qi]
+        
 
     def detect_with_gui(self):
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -429,20 +495,18 @@ class OMR4Camera(OMRbase):
                 # quit
                 keyinput=cv2.waitKey(1)
                 if keyinput & 0xFF == ord('q'):
-                    break
+                    return
                 elif keyinput & 0xFF == ord('z'):
                     is_sleeping = not is_sleeping
                 elif keyinput & 0xFF == ord(' '):
                     self.reset_detected_data()
                 elif keyinput & 0xFF == 27:
                     #ESC
-                    break
+                    return
                 elif keyinput & 0xFF == 13:
                     #enter
-                    #self.detected_data.sort()
-                    #self.detected_strings.sort()
-
-                    print(self.get_detected_answers_for_questions_as_csv_lines())
+                    for li in self.get_detected_answers_for_questions_as_csv_lines():
+                        print(li)
 
 
 
@@ -450,9 +514,25 @@ class OMR4Camera(OMRbase):
 
 
 
+def main_pdf():
+    if len(sys.argv) < 2:
+        usage="{:s} devicenum".format(sys.argv[0])
+        print(usage)
+        return
+    filename = sys.argv[1]
+    question = [ [(chr(ord("A")+i),"{:d}{:d}".format(j,k))  for k in range(1,5)] for j in range(1,6) for i in range(10)]
+    question_a = [[ (qij,"{:d}".format(j+1)) for (j,qij) in enumerate(qi) ] for qi in question]
+    a=[["0","1","2","3","4","5","6"],["7","8","9","A"],["B","C","D"],["E","F"]]
+    b=[["G","H","I"],["J","K","L","M"],["N","O"],["P","Q","R"]]
+    question =[[("Y",aij) for aij in ai] for ai in a]+[ [("Z",bij) for bij in bi]for bi in b]
+    question_b = [[ (qij,"{:d}".format(j+1)) for (j,qij) in enumerate(qi) ] for qi in question]
+    questions = {"B":question_a,"A":question_b}
 
-    
-def main():
+    omr = OMR4Pdf(filename,questions)
+    omr.detect_with_gui()
+
+
+def main_cap():
     if len(sys.argv) < 2:
         usage="{:s} devicenum".format(sys.argv[0])
         print(usage)
@@ -469,6 +549,18 @@ def main():
     omr = OMR4Camera(cap,questions)
     omr.detect_with_gui()
     cap.release()
+
+    
+def main():
+    if len(sys.argv) < 2:
+        usage="{:s} devicenum".format(sys.argv[0])
+        print(usage)
+        return
+    if sys.argv[1].endswith(".pdf"):
+        main_pdf()
+    else:
+        main_cap()
+
 
 
 if __name__ == "__main__":
